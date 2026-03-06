@@ -1,6 +1,6 @@
-import db from './database.js';
+import { prepare } from './database.js';
 
-const DEFAULT_PARAMS = {
+export const DEFAULT_PARAMS = {
   analysis_percentage: 0.15,
   implementation_percentage: 0.50,
   uat_percentage: 0.25,
@@ -22,7 +22,7 @@ const DEFAULT_PARAMS = {
 };
 
 function getParam(name) {
-  const row = db.prepare('SELECT value FROM estimation_parameters WHERE name = ?').get(name);
+  const row = prepare('SELECT value FROM estimation_parameters WHERE name = ?').get(name);
   return row ? row.value : DEFAULT_PARAMS[name] || 0;
 }
 
@@ -60,7 +60,6 @@ export function calculateEstimation(input) {
     user_overrides
   } = input;
 
-  // Base effort from components
   const baseEffort = calculateBaseEffort({
     num_file_extracts,
     num_data_models,
@@ -69,30 +68,25 @@ export function calculateEstimation(input) {
     num_packages
   });
 
-  // Apply complexity multiplier
   const complexityMultiplier = getParam(`complexity_${complexity}`);
   const totalComponentEffort = baseEffort * complexityMultiplier;
 
-  // Get phase percentages (allow overrides)
   const overrides = user_overrides || {};
   const analysisPct = overrides.analysis_percentage ?? getParam('analysis_percentage');
   const implPct = overrides.implementation_percentage ?? getParam('implementation_percentage');
   const uatPct = overrides.uat_percentage ?? getParam('uat_percentage');
   const prodPct = overrides.production_percentage ?? getParam('production_percentage');
 
-  // Calculate phase efforts
   const analysis_effort = totalComponentEffort * analysisPct;
   const implementation_effort = totalComponentEffort * implPct;
   const uat_effort = totalComponentEffort * uatPct;
   const production_deployment_effort = totalComponentEffort * prodPct;
 
-  // Distribute implementation across streams
   const activeStreams = [];
   if (impacts_dwh) activeStreams.push({ name: 'dwh', weight: getParam('dwh_weight') });
   if (impacts_mtii) activeStreams.push({ name: 'mtii', weight: getParam('mtii_weight') });
   if (impacts_moodys) activeStreams.push({ name: 'moodys', weight: getParam('moodys_weight') });
 
-  // Default to DWH if nothing selected
   if (activeStreams.length === 0) {
     activeStreams.push({ name: 'dwh', weight: getParam('dwh_weight') });
   }
@@ -110,10 +104,8 @@ export function calculateEstimation(input) {
     if (stream.name === 'moodys') moodys_implementation_effort = effort;
   }
 
-  // Data governance effort
   const data_governance_effort = num_tables * getParam('data_governance_per_table');
 
-  // Subtotal for PM calculation
   const subtotal = (
     analysis_effort +
     dwh_implementation_effort +
@@ -124,13 +116,8 @@ export function calculateEstimation(input) {
     data_governance_effort
   );
 
-  // PM effort
   const pm_effort = include_pm ? subtotal * getParam('pm_percentage') : 0;
-
-  // Post-rollout support
   const post_rollout_effort = post_rollout_weeks * getParam('post_rollout_weekly_effort');
-
-  // Total
   const total_effort = subtotal + pm_effort + post_rollout_effort;
 
   return {
@@ -146,5 +133,3 @@ export function calculateEstimation(input) {
     total_effort: Math.round(total_effort * 100) / 100
   };
 }
-
-export { DEFAULT_PARAMS };
